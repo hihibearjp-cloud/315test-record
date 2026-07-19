@@ -210,9 +210,8 @@
             
             const [settings, setSettings] = useState({
                 className: "315",
-                reportPeriod: "", // 預設清空，不顯示段考文字
                 gradingTone: "溫和鼓勵", 
-                printRemark: "請家長與學生一同審視本次測驗各科目範圍的熟練度，並持續配合在家複習。",
+                printRemark: "請家長與學生一同審視本次段考各科目範圍的熟練度，並持續配合在家複習。",
                 examType: "一般", 
                 showTotalAvg: true,
                 showClassAvg: true,
@@ -315,7 +314,6 @@
                             ...cloudData, 
                             subjects: normalizedSubjects, 
                             examType: cloudData.examType || "一般", 
-                            reportPeriod: cloudData.reportPeriod !== undefined ? cloudData.reportPeriod : "", 
                             showRadarChart: cloudData.showRadarChart !== undefined ? cloudData.showRadarChart : true 
                         });
                     }
@@ -323,24 +321,7 @@
 
                 const studentsRef = collection(db, `${basePath}/submissions`);
                 const unsubStudents = onSnapshot(studentsRef, (snap) => {
-                    // 加入嚴格的資料清理機制，防止爛資料導致畫面崩潰
-                    const list = snap.docs.map(d => {
-                        const rawData = d.data() || {};
-                        return {
-                            id: d.id,
-                            seatNo: rawData.seatNo || '',
-                            name: rawData.name || '未命名',
-                            password: rawData.password || '',
-                            loginCount: rawData.loginCount || 0,
-                            progress: rawData.progress || 0,
-                            scores: rawData.scores || {},
-                            classRank: rawData.classRank || null,
-                            classRankProgress: rawData.classRankProgress || null,
-                            schoolRank: rawData.schoolRank || null,
-                            schoolRankProgress: rawData.schoolRankProgress || null
-                        };
-                    });
-                    
+                    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                     // 確保按照座號排序
                     list.sort((a, b) => String(a.seatNo || '').localeCompare(String(b.seatNo || ''), undefined, {numeric: true}));
                     setStudents(list);
@@ -989,38 +970,6 @@
                 });
             };
 
-            // ================= 一鍵清除考科與成績 (保留名單) =================
-            const clearExamsAndScores = () => {
-                showConfirm(`🚨 極度危險操作：這將會清除【所有的考試科目】以及【全班所有學生的成績】！\n\n學生的座號、姓名與密碼會保留，方便新學期/新段考重新使用。\n強烈建議您在執行前先「下載完整備份」。\n\n您確定要一口氣清除所有成績與考科嗎？`, () => {
-                    const { db, doc, setDoc } = window.firebaseAPI;
-                    
-                    // 1. 清空所有考科
-                    const newSettings = { ...settings, subjects: [] };
-                    const settingsPromise = setDoc(doc(db, `${basePath}/settings/global`), newSettings);
-                    
-                    // 2. 清空所有學生的成績紀錄、排名、進步分數
-                    const studentPromises = students.map(s => {
-                        const updatedStudent = { 
-                            ...s, 
-                            scores: {}, 
-                            progress: 0, 
-                            classRank: null, 
-                            classRankProgress: null, 
-                            schoolRank: null, 
-                            schoolRankProgress: null 
-                        };
-                        return setDoc(doc(db, `${basePath}/submissions/${s.id}`), updatedStudent);
-                    });
-                    
-                    Promise.all([settingsPromise, ...studentPromises])
-                        .then(() => {
-                            setSettings(newSettings);
-                            showToast("💥 系統已重置！所有考科與成績已清空，學生名單已安全保留。");
-                        })
-                        .catch(e => showToast(`清除失敗：${e.message}`, "error"));
-                });
-            };
-
             const handleAddStudent = () => {
                 const seat = String(newStudentData.seatNo).trim();
                 const rawName = String(newStudentData.name).trim();
@@ -1204,8 +1153,8 @@
                                 <tr>
                                     <th className="px-2 sm:px-3 py-3 text-left font-black pl-3 sm:pl-4">科目</th>
                                     <th className="px-2 sm:px-3 py-3 text-left font-black">範圍</th>
+                                    <th className="px-2 sm:px-3 py-3 font-black">日期</th>
                                     <th className="px-2 sm:px-3 py-3 font-black">成績</th>
-                                    <th className="px-2 sm:px-3 py-3 font-black">測驗日期</th>
                                     {settings.showClassAvg && <th className="px-2 sm:px-3 py-3 font-black">班平均</th>}
                                     {allowEdit && <th className="px-2 sm:px-3 py-3 font-black no-print">登記</th>}
                                 </tr>
@@ -1219,11 +1168,9 @@
                                         <tr key={idx} className="hover:bg-slate-50">
                                             <td className="px-2 sm:px-3 py-3.5 text-left font-black text-slate-800 pl-3 sm:pl-4 whitespace-nowrap">{sub.name}</td>
                                             <td className="px-2 sm:px-3 py-3.5 text-left text-slate-600 max-w-[100px] sm:max-w-[140px] truncate" title={sub.scope}>{sub.scope}</td>
+                                            <td className="px-2 sm:px-3 py-3.5 text-slate-500 text-xs sm:text-sm whitespace-nowrap">{sub.date}</td>
                                             <td className="px-2 sm:px-3 py-3.5 font-black text-lg sm:text-xl text-[#00704A]">
                                                 {score !== null ? score.toFixed(1) : "-"}
-                                            </td>
-                                            <td className="px-1 sm:px-2 py-3.5 text-slate-500 text-[11px] sm:text-xs leading-tight max-w-[90px] sm:max-w-[110px] break-words">
-                                                {sub.date}
                                             </td>
                                             {settings.showClassAvg && <td className="px-2 sm:px-3 py-3.5 text-slate-500 font-bold">{classAvg > 0 ? classAvg.toFixed(1) : "-"}</td>}
                                             {allowEdit && (
@@ -1243,9 +1190,8 @@
                                 {showTotalRow && settings.showTotalAvg && (
                                     <tr className="bg-emerald-50/50 font-black border-t-2 border-emerald-200">
                                         <td className="px-2 sm:px-3 py-4 text-left pl-3 sm:pl-4 text-[#00704A] text-base sm:text-lg whitespace-nowrap">總平均</td>
-                                        <td className="text-right text-slate-500 text-sm pr-2">學科估算：</td>
+                                        <td colSpan="2" className="text-right text-slate-500 text-sm">學科估算：</td>
                                         <td className="px-2 sm:px-3 py-4 text-[#00704A] text-xl sm:text-2xl font-black">{calculateStudentAvg(targetStudent).toFixed(1)}</td>
-                                        <td className="px-2 sm:px-3 py-4"></td>
                                         {settings.showClassAvg && <td className="px-2 sm:px-3 py-4"></td>}
                                         {allowEdit && <td className="px-2 sm:px-3 py-4 no-print"></td>}
                                     </tr>
@@ -1276,16 +1222,9 @@
                                 ⚠️ 系統提醒：請務必於考試後【兩日內】登入完成成績登記
                             </div>
 
-                            <div className="border-b-2 border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-end justify-between gap-2">
-                                <div className="flex items-baseline gap-2">
-                                    <h2 className="text-3xl sm:text-4xl font-black text-slate-800 mt-1">{targetStudent.name}</h2> 
-                                    <span className="text-base font-bold text-slate-500">的成績通知單</span>
-                                </div>
-                                {settings.reportPeriod && (
-                                    <div className="text-sm sm:text-base font-black text-indigo-700 bg-indigo-50 px-4 py-1.5 rounded-xl border border-indigo-100 shadow-sm flex items-center gap-1.5 w-fit mb-1">
-                                        <span>📅</span> {settings.reportPeriod}
-                                    </div>
-                                )}
+                            <div className="border-b-2 border-slate-100 pb-3 flex items-baseline gap-2">
+                                <h2 className="text-3xl sm:text-4xl font-black text-slate-800 mt-1">{targetStudent.name}</h2> 
+                                <span className="text-base font-bold text-slate-500">的成績通知單</span>
                             </div>
 
                             {/* 智慧雙欄成績列表 */}
@@ -1366,6 +1305,7 @@
                                 <div className="flex flex-col gap-3">
                                     <div className="border-b-2 border-slate-100 pb-2 flex justify-between items-center">
                                         <h3 className="font-black text-slate-800 text-lg">📊 AI學習診斷與評語</h3>
+                                        {/* 已依照要求，在此移除語氣顯示標籤 */}
                                     </div>
 
                                     {settings.enableComments ? (
@@ -1410,7 +1350,7 @@
                         <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setConfirmDialog({ isOpen: false, message: '', onConfirm: null })}>
                             <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
                                 <h3 className="text-lg font-black text-slate-800 text-center mb-4 flex items-center justify-center gap-2"><span>⚠️</span> 系統確認</h3>
-                                <p className="text-sm font-bold text-slate-600 mb-6 text-center whitespace-pre-wrap">{confirmDialog.message}</p>
+                                <p className="text-sm font-bold text-slate-600 mb-6 text-center">{confirmDialog.message}</p>
                                 <div className="flex gap-2">
                                     <button onClick={() => setConfirmDialog({ isOpen: false, message: '', onConfirm: null })} className="flex-1 bg-slate-100 hover:bg-slate-200 py-3 rounded-2xl text-sm font-bold text-slate-600 transition">取消</button>
                                     <button onClick={() => {
@@ -1933,51 +1873,6 @@
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-4 mt-1">
-                                        <div className="col-span-2">
-                                            <label className="block text-[11px] font-bold text-slate-500 mb-1">成績時間區間 (起 ~ 迄)</label>
-                                            <div className="flex items-center gap-2">
-                                                <input 
-                                                    type="date" 
-                                                    className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-[#00704A] outline-none text-slate-700" 
-                                                    value={(() => {
-                                                        const d = (settings.reportPeriod || '').split('~')[0];
-                                                        return d && /^\d{4}-\d{2}-\d{2}$/.test(d.trim()) ? d.trim() : '';
-                                                    })()}
-                                                    onChange={e => { 
-                                                        const parts = (settings.reportPeriod || '').split('~');
-                                                        const endRaw = parts.length > 1 ? parts[1].trim() : '';
-                                                        const end = /^\d{4}-\d{2}-\d{2}$/.test(endRaw) ? endRaw : '';
-                                                        const start = e.target.value;
-                                                        const val = [start, end].filter(Boolean).join(' ~ ');
-                                                        const s = {...settings, reportPeriod: val}; 
-                                                        setSettings(s); saveSettingsToCloud(s); 
-                                                    }} 
-                                                />
-                                                <span className="text-slate-400 font-bold">~</span>
-                                                <input 
-                                                    type="date" 
-                                                    className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-[#00704A] outline-none text-slate-700" 
-                                                    value={(() => {
-                                                        const parts = (settings.reportPeriod || '').split('~');
-                                                        const d = parts.length > 1 ? parts[1] : '';
-                                                        return d && /^\d{4}-\d{2}-\d{2}$/.test(d.trim()) ? d.trim() : '';
-                                                    })()}
-                                                    onChange={e => { 
-                                                        const parts = (settings.reportPeriod || '').split('~');
-                                                        const startRaw = parts[0] ? parts[0].trim() : '';
-                                                        const start = /^\d{4}-\d{2}-\d{2}$/.test(startRaw) ? startRaw : '';
-                                                        const end = e.target.value;
-                                                        const val = [start, end].filter(Boolean).join(' ~ ');
-                                                        const s = {...settings, reportPeriod: val}; 
-                                                        setSettings(s); saveSettingsToCloud(s); 
-                                                    }} 
-                                                />
-                                            </div>
-                                            <p className="text-[10px] text-slate-400 mt-1">此設定會顯示在學生專屬成績單上方。</p>
-                                        </div>
-                                    </div>
-
                                     <div>
                                         <label className="block text-[11px] font-bold text-slate-500 mb-1">列印總備註內容</label>
                                         <textarea rows="2" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs" value={settings.printRemark} onChange={e => { const s = {...settings, printRemark: e.target.value}; setSettings(s); saveSettingsToCloud(s); }} />
@@ -2039,7 +1934,7 @@
                                             </div>
 
                                             <div className="flex-1 flex flex-col gap-1 w-full">
-                                                <label className="text-[10px] text-slate-500 font-bold">測驗日期</label>
+                                                <label className="text-[10px] text-slate-500 font-bold">日期</label>
                                                 <input type="date" className="h-[38px] px-2 bg-white border border-slate-300 rounded-lg text-center text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-600" value={newSubjectDate} onChange={e => setNewSubjectDate(e.target.value)} />
                                             </div>
 
@@ -2078,7 +1973,7 @@
                                                                 <input type="text" className="w-full px-2 border border-blue-200 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 h-[38px]" placeholder="範圍" value={editingSubjectConfig.scope} onChange={e => setEditingSubjectConfig({...editingSubjectConfig, scope: e.target.value})} />
                                                             </div>
                                                             <div className="flex-1 w-full">
-                                                                <label className="text-[10px] text-blue-600 font-bold">測驗日期</label>
+                                                                <label className="text-[10px] text-blue-600 font-bold">日期</label>
                                                                 <input type="date" className="w-full px-2 border border-blue-200 rounded-lg bg-white text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-400 h-[38px]" value={toDateInputFormat(editingSubjectConfig.date)} onChange={e => setEditingSubjectConfig({...editingSubjectConfig, date: e.target.value})} />
                                                             </div>
                                                         </div>
@@ -2173,25 +2068,19 @@
                                 </div>
 
                                 {/* 系統安全備份區塊 */}
-                                <div className="bg-slate-800 p-5 rounded-3xl border border-slate-700 shadow-lg flex flex-col xl:flex-row justify-between items-center gap-4 text-slate-300">
+                                <div className="bg-slate-800 p-5 rounded-3xl border border-slate-700 shadow-lg flex flex-col sm:flex-row justify-between items-center gap-4 text-slate-300">
                                     <div>
                                         <h4 className="font-bold text-white flex items-center gap-2"><span>🛡️</span> 系統安全與資料備份</h4>
-                                        <p className="text-xs mt-1">建議每週備份一次。遇到新段考或新學期，可使用右側按鈕一鍵清空成績重新開始。</p>
+                                        <p className="text-xs mt-1">匯出 JSON 格式以完整備份「所有設定與學生成績」。若有遺失可隨時還原。</p>
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-2 justify-end">
+                                    <div className="flex gap-2">
                                         <button onClick={() => backupFileInputRef.current.click()} className="bg-slate-700 hover:bg-slate-600 text-white text-xs px-4 py-2.5 rounded-xl font-bold transition">
                                             🔄 從備份還原
                                         </button>
-                                        <button onClick={exportBackupJSON} className="bg-amber-500 hover:bg-amber-600 text-amber-950 text-xs px-4 py-2.5 rounded-xl font-bold transition shadow-md sm:mr-2">
+                                        <button onClick={exportBackupJSON} className="bg-amber-500 hover:bg-amber-600 text-amber-950 text-xs px-4 py-2.5 rounded-xl font-bold transition shadow-md">
                                             💾 下載完整備份
                                         </button>
                                         <input type="file" ref={backupFileInputRef} className="hidden" accept=".json" onChange={e => importBackupJSON(e.target.files[0])} />
-                                        
-                                        <div className="h-6 w-px bg-slate-600 hidden sm:block"></div>
-                                        
-                                        <button onClick={clearExamsAndScores} className="bg-rose-600 hover:bg-rose-700 text-white text-xs px-4 py-2.5 rounded-xl font-black transition shadow-md border border-rose-800 flex items-center gap-1.5 active:scale-95 w-full sm:w-auto justify-center">
-                                            <span>💥</span> 一鍵清空所有成績/考科 (保留名單)
-                                        </button>
                                     </div>
                                 </div>
 
@@ -2346,4 +2235,5 @@
     </script>
 </body>
 </html>
+
 
