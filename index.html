@@ -280,9 +280,12 @@
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await signInWithCustomToken(auth, __initial_auth_token);
                         } else {
+                            // 若使用者未在 Firebase 後台開通匿名登入，這裡會報錯，但我們不阻擋程式執行
                             await signInAnonymously(auth);
                         }
-                    } catch (e) { console.error("登入錯誤:", e); }
+                    } catch (e) { 
+                        console.warn("登入驗證失敗，但若資料庫規則開放仍可運作:", e); 
+                    }
                 };
 
                 initAuth();
@@ -292,9 +295,10 @@
                 return () => unsubscribe();
             }, [firebaseReady]);
 
-            // ================= 監聽資料庫 =================
+            // ================= 監聽資料庫 (最關鍵的修正區) =================
             useEffect(() => {
-                if (!firebaseReady || !firebaseUser) return; 
+                // 修正重點：把 !firebaseUser 拿掉。只要 Firebase 準備好，就算未登入也直接去抓資料！
+                if (!firebaseReady) return; 
                 
                 const { db, onSnapshot, doc, collection } = window.firebaseAPI;
 
@@ -316,7 +320,11 @@
                             showRadarChart: cloudData.showRadarChart !== undefined ? cloudData.showRadarChart : true 
                         });
                     }
-                }, (error) => console.error("設定檔讀取失敗:", error));
+                }, (error) => {
+                    console.error("設定檔讀取失敗:", error);
+                    // 假如 Firebase 權限沒有改對，這裡會直接跳出紅色通知告訴你
+                    showToast("讀取資料被拒絕！請確認 Firebase 的 Rules 是否已改為 allow read, write: if true;", "error");
+                });
 
                 const studentsRef = collection(db, `${basePath}/submissions`);
                 const unsubStudents = onSnapshot(studentsRef, (snap) => {
@@ -350,7 +358,7 @@
                 }, (error) => console.error("學生資料讀取失敗:", error));
 
                 return () => { unsubSettings(); unsubStudents(); };
-            }, [firebaseReady, firebaseUser, basePath]);
+            }, [firebaseReady, basePath]); // 移除了 firebaseUser 依賴
 
             // ================= 工具函數 =================
             const showToast = (text, type = 'success') => {
@@ -411,14 +419,6 @@
                 });
                 stats.avg = totalSum / students.length;
                 return stats;
-            };
-
-            const getGradeLevelName = (avg) => {
-                if (avg >= 90) return "A級距 (90-100)";
-                if (avg >= 80) return "B級距 (80-89)";
-                if (avg >= 70) return "C級距 (70-79)";
-                if (avg >= 60) return "D級距 (60-69)";
-                return "E級距 (60分以下)";
             };
 
             const getLocalDiagnostic = (student, subName, score, classAvg, tone) => {
