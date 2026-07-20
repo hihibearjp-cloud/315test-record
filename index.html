@@ -38,7 +38,10 @@
     <!-- 載入 SheetJS (Excel 解析必備) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-    <!-- 移除了容易在 GitHub 出錯的 Firebase，改用 localStorage -->
+    <!-- 最穩定的 Firebase v8.10.1 版本 -->
+    <script crossorigin src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script crossorigin src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script crossorigin src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght=300;400;500;700;900&display=swap');
@@ -121,11 +124,56 @@
 <body class="min-h-screen text-slate-800 flex flex-col">
     <div id="root"></div>
 
+    <!-- Firebase v8 初始化腳本 -->
+    <script>
+        var firebaseConfig;
+        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+            firebaseConfig = JSON.parse(__firebase_config);
+        } else {
+            // 使用你原本提供的 Firebase 金鑰
+            firebaseConfig = {
+                apiKey: "AIzaSyCBWQlxFEjio3mE5TSl5X6Ng_c1drXwcF0",
+                authDomain: "class-report-3191c.firebaseapp.com",
+                projectId: "class-report-3191c",
+                storageBucket: "class-report-3191c.firebasestorage.app",
+                messagingSenderId: "1077190697392",
+                appId: "1:1077190697392:web:ca99c2cfdc157cdf393675",
+                measurementId: "G-PMEH4L01SR"
+            };
+        }
+        
+        try {
+            firebase.initializeApp(firebaseConfig);
+            
+            window.firebaseAPI = {
+                db: firebase.firestore(),
+                auth: firebase.auth(),
+                signInAnonymously: function(a) { return a.signInAnonymously(); },
+                signInWithCustomToken: function(a, t) { return a.signInWithCustomToken(t); },
+                onAuthStateChanged: function(a, cb) { return a.onAuthStateChanged(cb); },
+                collection: function(d, p) { return d.collection(p); },
+                doc: function(d, p) { return d.doc(p); },
+                setDoc: function(ref, data) { return ref.set(data); },
+                onSnapshot: function(ref, cb, err) { return ref.onSnapshot(cb, err); },
+                deleteDoc: function(ref) { return ref.delete(); }
+            };
+
+            try {
+                window.dispatchEvent(new Event('firebase-ready'));
+            } catch (e) {
+                var event = document.createEvent('Event');
+                event.initEvent('firebase-ready', true, true);
+                window.dispatchEvent(event);
+            }
+        } catch (e) {
+            console.error("Firebase 初始化失敗", e);
+        }
+    </script>
+
     <!-- React 邏輯 -->
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // 建立 React 錯誤邊界元件
         class ErrorBoundary extends React.Component {
             constructor(props) {
                 super(props);
@@ -148,53 +196,32 @@
             }
         }
 
-        // ================= Local Storage Helper =================
-        const STORAGE_KEY_SETTINGS = 'class315_settings';
-        const STORAGE_KEY_STUDENTS = 'class315_students';
-
-        const loadFromLocal = (key, defaultVal) => {
-            try {
-                const item = localStorage.getItem(key);
-                return item ? JSON.parse(item) : defaultVal;
-            } catch (e) {
-                console.error("Local storage error:", e);
-                return defaultVal;
-            }
-        };
-
-        const saveToLocal = (key, data) => {
-            try {
-                localStorage.setItem(key, JSON.stringify(data));
-            } catch (e) {
-                console.error("Local storage save error:", e);
-            }
-        };
-
         function App() {
+            const checkFirebase = (window.firebaseAPI && window.firebaseAPI.auth) ? true : false;
+            const [firebaseReady, setFirebaseReady] = useState(checkFirebase);
+            const [firebaseUser, setFirebaseUser] = useState(null);
+            
+            const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'class-315-system'; 
+            const basePath = `artifacts/${appId}/public/data`;
+            
             const [viewMode, setViewMode] = useState('parent-login'); 
             const [currentStudent, setCurrentStudent] = useState(null);
+            const [students, setStudents] = useState([]);
             
-            // 初始化 state 時從 localStorage 讀取
-            const [students, setStudents] = useState(() => loadFromLocal(STORAGE_KEY_STUDENTS, []));
-            
-            const [settings, setSettings] = useState(() => {
-                const defaultSettings = {
-                    className: "315",
-                    reportPeriod: "", 
-                    gradingTone: "溫和鼓勵", 
-                    printRemark: "請家長與學生一同審視本次測驗各科目範圍的熟練度，並持續配合在家複習。",
-                    examType: "一般", 
-                    showTotalAvg: true,
-                    showClassAvg: true,
-                    showProgress: true,
-                    enableComments: true,
-                    showRadarChart: true,
-                    subjects: []
-                };
-                return loadFromLocal(STORAGE_KEY_SETTINGS, defaultSettings);
+            const [settings, setSettings] = useState({
+                className: "315",
+                reportPeriod: "", 
+                gradingTone: "溫和鼓勵", 
+                printRemark: "請家長與學生一同審視本次測驗各科目範圍的熟練度，並持續配合在家複習。",
+                examType: "一般", 
+                showTotalAvg: true,
+                showClassAvg: true,
+                showProgress: true,
+                enableComments: true,
+                showRadarChart: true,
+                subjects: []
             });
 
-            // loginData 包含學生登入、與任課老師選擇的科目與密碼
             const [loginData, setLoginData] = useState({ seatNo: '', password: '', subjectTeacherPass: '', selectedSubject: '' });
             const [teacherPass, setTeacherPass] = useState('');
             const [showTeacherModal, setShowTeacherModal] = useState(false);
@@ -235,19 +262,95 @@
             const subjectLogoClickCount = useRef(0);
             const subjectLogoClickTimer = useRef(null);
 
-            // ================= 每次設定或學生資料改變，同步到 LocalStorage =================
+            // ================= Firebase 初始化 =================
             useEffect(() => {
-                saveToLocal(STORAGE_KEY_SETTINGS, settings);
-            }, [settings]);
+                if (!window.firebaseAPI || !window.firebaseAPI.auth) {
+                    const handleReady = () => setFirebaseReady(true);
+                    window.addEventListener('firebase-ready', handleReady);
+                    return () => window.removeEventListener('firebase-ready', handleReady);
+                }
+            }, []);
 
             useEffect(() => {
-                saveToLocal(STORAGE_KEY_STUDENTS, students);
-                // 同步更新當前查看的學生資料
-                if (currentStudent) {
-                    const updated = students.find(s => s.id === currentStudent.id);
-                    if (updated) setCurrentStudent(updated);
-                }
-            }, [students]);
+                if (!firebaseReady) return;
+                const { auth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = window.firebaseAPI;
+                
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (e) { console.error("登入錯誤:", e); }
+                };
+
+                initAuth();
+                const unsubscribe = onAuthStateChanged(auth, user => {
+                    setFirebaseUser(user);
+                });
+                return () => unsubscribe();
+            }, [firebaseReady]);
+
+            // ================= 監聽資料庫 =================
+            useEffect(() => {
+                if (!firebaseReady || !firebaseUser) return; 
+                
+                const { db, onSnapshot, doc, collection } = window.firebaseAPI;
+
+                const settingsRef = doc(db, `${basePath}/settings/global`);
+                const unsubSettings = onSnapshot(settingsRef, (snap) => {
+                    if (snap.exists) {
+                        const cloudData = typeof snap.data === 'function' ? snap.data() : snap;
+                        
+                        let rawSubjects = cloudData.subjects || [];
+                        const normalizedSubjects = rawSubjects.map(sub => {
+                            if (typeof sub === 'string') return { name: sub, date: "", scope: "未設定範圍", locked: false };
+                            return { name: sub.name || "", date: sub.date || "", scope: sub.scope || "未設定", locked: sub.locked ? true : false };
+                        });
+                        setSettings({ 
+                            ...cloudData, 
+                            subjects: normalizedSubjects, 
+                            examType: cloudData.examType || "一般", 
+                            reportPeriod: cloudData.reportPeriod !== undefined ? cloudData.reportPeriod : "", 
+                            showRadarChart: cloudData.showRadarChart !== undefined ? cloudData.showRadarChart : true 
+                        });
+                    }
+                }, (error) => console.error("設定檔讀取失敗:", error));
+
+                const studentsRef = collection(db, `${basePath}/submissions`);
+                const unsubStudents = onSnapshot(studentsRef, (snap) => {
+                    const list = snap.docs.map(d => {
+                        const rawData = d.data() || {};
+                        return {
+                            id: d.id,
+                            seatNo: rawData.seatNo || '',
+                            name: rawData.name || '未命名',
+                            password: rawData.password || '',
+                            loginCount: rawData.loginCount || 0,
+                            progress: rawData.progress || 0,
+                            scores: rawData.scores || {},
+                            classRank: rawData.classRank || null,
+                            classRankProgress: rawData.classRankProgress || null,
+                            schoolRank: rawData.schoolRank || null,
+                            schoolRankProgress: rawData.schoolRankProgress || null
+                        };
+                    });
+                    
+                    list.sort((a, b) => String(a.seatNo || '').localeCompare(String(b.seatNo || ''), undefined, {numeric: true}));
+                    setStudents(list);
+
+                    setCurrentStudent(prev => {
+                        if (prev) {
+                            const updated = list.find(s => s.id === prev.id);
+                            return updated || prev;
+                        }
+                        return prev;
+                    });
+                }, (error) => console.error("學生資料讀取失敗:", error));
+
+                return () => { unsubSettings(); unsubStudents(); };
+            }, [firebaseReady, firebaseUser, basePath]);
 
             // ================= 工具函數 =================
             const showToast = (text, type = 'success') => {
@@ -259,10 +362,11 @@
                 setConfirmDialog({ isOpen: true, message, onConfirm });
             };
 
-            // 取代原本存上雲端的寫法，現在直接透過 setState 觸發 useEffect 存入 LocalStorage
             const saveSettingsToCloud = (newSettings) => {
-                setSettings(newSettings);
-                showToast("設定已儲存！");
+                const { db, doc, setDoc } = window.firebaseAPI;
+                setDoc(doc(db, `${basePath}/settings/global`), newSettings)
+                    .then(() => showToast("設定已同步儲存！"))
+                    .catch(e => showToast(`同步失敗：${e.message}`, "error"));
             };
 
             const getStudentScore = (student, subName) => {
@@ -444,9 +548,6 @@
                     const newLoginCount = (found.loginCount || 0) + 1;
                     const updatedStudent = { ...found, loginCount: newLoginCount };
                     
-                    // 更新陣列中的學生
-                    setStudents(prev => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
-                    
                     setCurrentStudent(updatedStudent);
                     setViewMode('parent-dashboard');
 
@@ -460,6 +561,9 @@
                     } else {
                         showToast(`登入成功！歡迎 ${found.name}！`);
                     }
+                    
+                    const { db, doc, setDoc } = window.firebaseAPI;
+                    setDoc(doc(db, `${basePath}/submissions/${found.id}`), updatedStudent).catch(e => console.error("登入次數同步失敗", e));
                 } else {
                     showToast("座號或密碼輸入錯誤！", "error");
                 }
@@ -470,6 +574,7 @@
                 const newSubjects = settings.subjects.map(s => ({ ...s, locked: locked }));
                 const newSettings = { ...settings, subjects: newSubjects };
                 setSettings(newSettings);
+                saveSettingsToCloud(newSettings);
             };
 
             const openQuickScore = () => {
@@ -531,8 +636,10 @@
             };
 
             const saveQuickScores = () => {
+                const { db, doc, setDoc } = window.firebaseAPI;
                 let hasChanges = false;
-                const newStudents = students.map(s => {
+
+                const updatePromises = students.map(s => {
                     const newVal = quickScoreData[s.id];
                     let parsedVal = null;
                     if (newVal !== '' && newVal !== undefined && newVal !== null) {
@@ -548,23 +655,28 @@
                         } else {
                             newScores[quickScoreSubject] = parsedVal;
                         }
-                        return { ...s, scores: newScores };
+                        
+                        const updatedStudent = { ...s, scores: newScores };
+                        return setDoc(doc(db, `${basePath}/submissions/${s.id}`), updatedStudent);
                     }
-                    return s;
+                    return Promise.resolve();
                 });
 
-                if (hasChanges) {
-                    setStudents(newStudents);
-                    showToast(`✅ ${quickScoreSubject} 全班成績已更新儲存！`);
-                } else {
-                    showToast(`沒有修改任何成績。`, "warning");
-                }
-                setShowQuickScoreModal(false);
+                Promise.all(updatePromises).then(() => {
+                    if (hasChanges) {
+                        showToast(`✅ ${quickScoreSubject} 全班成績已更新儲存！`);
+                    } else {
+                        showToast(`沒有修改任何成績。`, "warning");
+                    }
+                    setShowQuickScoreModal(false);
+                }).catch(e => showToast(`儲存失敗：${e.message}`, "error"));
             };
 
             const saveSubjectTeacherScores = () => {
+                const { db, doc, setDoc } = window.firebaseAPI;
                 let hasChanges = false;
-                const newStudents = students.map(s => {
+
+                const updatePromises = students.map(s => {
                     const newVal = subjectEditData[s.id];
                     let parsedVal = null;
                     if (newVal !== '' && newVal !== undefined && newVal !== null) {
@@ -580,17 +692,20 @@
                         } else {
                             newScores[analyticsSubject] = parsedVal;
                         }
-                        return { ...s, scores: newScores };
+                        
+                        const updatedStudent = { ...s, scores: newScores };
+                        return setDoc(doc(db, `${basePath}/submissions/${s.id}`), updatedStudent);
                     }
-                    return s;
+                    return Promise.resolve();
                 });
 
-                if (hasChanges) {
-                    setStudents(newStudents);
-                    showToast(`✅ ${analyticsSubject} 全班成績已成功儲存！`);
-                } else {
-                    showToast(`沒有修改任何成績。`, "warning");
-                }
+                Promise.all(updatePromises).then(() => {
+                    if (hasChanges) {
+                        showToast(`✅ ${analyticsSubject} 全班成績已成功儲存並同步！`);
+                    } else {
+                        showToast(`沒有修改任何成績。`, "warning");
+                    }
+                }).catch(e => showToast(`儲存失敗：${e.message}`, "error"));
             };
 
             const handleAddSubject = () => {
@@ -618,6 +733,7 @@
                     subjects: [...settings.subjects, { name: finalName, date: newSubjectDate.trim() || "", scope: newSubjectScope.trim() || "未設定", locked: false }] 
                 };
                 setSettings(newSettings);
+                saveSettingsToCloud(newSettings);
                 
                 setNewSubjectName('數學'); 
                 setCustomSubjectName(''); 
@@ -629,6 +745,7 @@
                 showConfirm(`⚠️ 確定要刪除「${subjectName}」嗎？這會同時移除學生在該科目的所有成績！`, () => {
                     const newSettings = { ...settings, subjects: settings.subjects.filter(s => s && s.name !== subjectName) };
                     setSettings(newSettings);
+                    saveSettingsToCloud(newSettings);
                 });
             };
 
@@ -644,15 +761,19 @@
                 const scoreNum = parseFloat(editForm.score);
                 if (isNaN(scoreNum) || scoreNum < 0 || scoreNum > 100) return showToast("請輸入 0-100 的成績！", "error");
 
+                const { db, doc, setDoc } = window.firebaseAPI;
                 const newScoresObj = { ...(currentStudent.scores || {}) };
                 newScoresObj[editingSubject.name] = scoreNum;
                 
                 const updatedStudent = { ...currentStudent, scores: newScoresObj };
 
-                setStudents(prev => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
-                setCurrentStudent(updatedStudent);
-                showToast(`✅ ${editingSubject.name} 成績已成功儲存！`);
-                setEditingSubject(null);
+                setDoc(doc(db, `${basePath}/submissions/${currentStudent.id}`), updatedStudent)
+                    .then(() => {
+                        setCurrentStudent(updatedStudent);
+                        showToast(`✅ ${editingSubject.name} 成績已成功儲存！`);
+                        setEditingSubject(null);
+                    })
+                    .catch(e => showToast(`儲存失敗：${e.message}`, "error"));
             };
 
             const processExcelOrCsv = (file, callback) => {
@@ -680,13 +801,9 @@
             const processImportedJson = (json) => {
                 if (json.length === 0) return showToast("檔案內沒有有效數據！", "error");
 
-                const newStudentsList = [...students];
-
-                json.forEach((row, idx) => {
+                const parsedStudents = json.map((row, idx) => {
                     const seat = String(row['座號'] || String(idx+1)).trim();
-                    const existingIndex = newStudentsList.findIndex(s => s && s.seatNo === seat);
-                    const existingStudent = existingIndex >= 0 ? newStudentsList[existingIndex] : null;
-                    
+                    const existingStudent = students.find(s => s && s.seatNo === seat);
                     const rawName = String(row['姓名'] || (existingStudent && existingStudent.name ? existingStudent.name : `同學 ${idx+1}`)).trim();
                     const maskedName = maskName(rawName);
 
@@ -700,8 +817,8 @@
                         }
                     });
 
-                    const updatedObj = {
-                        id: existingStudent ? existingStudent.id : `student_${Date.now()}_${seat}`,
+                    return {
+                        id: `student_${seat}`,
                         seatNo: seat,
                         name: maskedName,
                         password: row['密碼'] !== undefined && row['密碼'] !== '' ? String(row['密碼']).trim() : (existingStudent && existingStudent.password ? existingStudent.password : seat), 
@@ -713,18 +830,14 @@
                         schoolRankProgress: row['校排進步'] !== undefined && row['校排進步'] !== '' ? parseInt(row['校排進步']) : (existingStudent && existingStudent.schoolRankProgress !== undefined ? existingStudent.schoolRankProgress : null),
                         scores: studentScores
                     };
-
-                    if (existingIndex >= 0) {
-                        newStudentsList[existingIndex] = updatedObj;
-                    } else {
-                        newStudentsList.push(updatedObj);
-                    }
                 });
 
-                // 排序並更新
-                newStudentsList.sort((a, b) => String(a.seatNo || '').localeCompare(String(b.seatNo || ''), undefined, {numeric: true}));
-                setStudents(newStudentsList);
-                showToast(`✅ 成功匯入更新 ${json.length} 筆學生資料與成績！`);
+                const { db, doc, setDoc } = window.firebaseAPI;
+                const writePromises = parsedStudents.map(s => setDoc(doc(db, `${basePath}/submissions/${s.id}`), s));
+                
+                Promise.all(writePromises)
+                    .then(() => showToast(`✅ 成功匯入更新 ${parsedStudents.length} 筆學生資料與成績！`))
+                    .catch(err => showToast(`寫入資料庫失敗：${err.message}`, "error"));
             };
 
             const handleFileUpload = (file) => {
@@ -746,7 +859,9 @@
 
                     const updatedSettings = { ...settings, subjects: newSubjects };
                     setSettings(updatedSettings);
-                    showToast(`✅ 成功批次匯入 ${newSubjects.length} 個考試科目！`);
+                    saveSettingsToCloud(updatedSettings).then(() => {
+                        showToast(`✅ 成功批次匯入 ${newSubjects.length} 個考試科目！`);
+                    });
                 });
                 if (subjectFileInputRef.current) subjectFileInputRef.current.value = "";
             };
@@ -827,9 +942,13 @@
                         if (!backupData.settings || !backupData.students) throw new Error("備份檔格式不正確");
                         
                         showConfirm("⚠️ 警告：還原將會覆蓋目前的「所有設定與學生資料」，確定繼續？", () => {
-                            setSettings(backupData.settings);
-                            setStudents(backupData.students);
-                            showToast("🔄 系統備份已成功還原！");
+                            const { db, doc, setDoc } = window.firebaseAPI;
+                            setDoc(doc(db, `${basePath}/settings/global`), backupData.settings).then(() => {
+                                const promises = backupData.students.map(s => setDoc(doc(db, `${basePath}/submissions/${s.id}`), s));
+                                return Promise.all(promises);
+                            }).then(() => {
+                                showToast("🔄 系統備份已成功還原！");
+                            }).catch(err => showToast(`還原失敗：${err.message}`, "error"));
                         });
 
                     } catch (err) { showToast(`還原失敗：${err.message}`, "error"); }
@@ -840,19 +959,23 @@
 
             const clearDatabase = () => {
                 showConfirm(`警告：將清空所有學生的名單與成績！確定嗎？`, () => {
-                    setStudents([]);
-                    showToast("資料庫已清空！");
+                    const { db, doc, deleteDoc } = window.firebaseAPI;
+                    const promises = students.map(s => deleteDoc(doc(db, `${basePath}/submissions/${s.id}`)));
+                    Promise.all(promises)
+                        .then(() => showToast("資料庫已清空！"))
+                        .catch(e => showToast(`清空失敗：${e.message}`, "error"));
                 });
             };
 
             const clearExamsAndScores = () => {
                 showConfirm(`🚨 極度危險操作：這將會清除【所有的考試科目】以及【全班所有學生的成績】！\n\n學生的座號、姓名與密碼會保留，方便新學期/新段考重新使用。\n強烈建議您在執行前先「下載完整備份」。\n\n您確定要一口氣清除所有成績與考科嗎？`, () => {
+                    const { db, doc, setDoc } = window.firebaseAPI;
                     
                     const newSettings = { ...settings, subjects: [] };
-                    setSettings(newSettings);
+                    const settingsPromise = setDoc(doc(db, `${basePath}/settings/global`), newSettings);
                     
-                    const newStudents = students.map(s => {
-                        return { 
+                    const studentPromises = students.map(s => {
+                        const updatedStudent = { 
                             ...s, 
                             scores: {}, 
                             progress: 0, 
@@ -861,9 +984,15 @@
                             schoolRank: null, 
                             schoolRankProgress: null 
                         };
+                        return setDoc(doc(db, `${basePath}/submissions/${s.id}`), updatedStudent);
                     });
-                    setStudents(newStudents);
-                    showToast("💥 系統已重置！所有考科與成績已清空，學生名單已安全保留。");
+                    
+                    Promise.all([settingsPromise, ...studentPromises])
+                        .then(() => {
+                            setSettings(newSettings);
+                            showToast("💥 系統已重置！所有考科與成績已清空，學生名單已安全保留。");
+                        })
+                        .catch(e => showToast(`清除失敗：${e.message}`, "error"));
                 });
             };
 
@@ -875,22 +1004,26 @@
                 if (!seat || !rawName) return showToast("請填寫座號與姓名！", "error");
                 if (students.some(s => String(s.seatNo).trim() === seat)) return showToast("座號重複！", "error");
 
-                const newId = `student_${Date.now()}_${seat}`;
+                const { db, doc, setDoc } = window.firebaseAPI;
+                const newId = `student_${seat}`;
                 const maskedName = maskName(rawName);
                 const studentObj = { id: newId, seatNo: seat, name: maskedName, password: pwd, progress: 0, loginCount: 0, classRank: null, classRankProgress: null, schoolRank: null, schoolRankProgress: null, scores: {} };
                 
-                const newStudents = [...students, studentObj].sort((a, b) => String(a.seatNo || '').localeCompare(String(b.seatNo || ''), undefined, {numeric: true}));
-                setStudents(newStudents);
-                
-                setNewStudentData({ seatNo: '', name: '', password: '' });
-                setShowAddStudent(false);
-                showToast(`學生 ${maskedName} 新增成功！`);
+                setDoc(doc(db, `${basePath}/submissions/${newId}`), studentObj)
+                    .then(() => {
+                        setNewStudentData({ seatNo: '', name: '', password: '' });
+                        setShowAddStudent(false);
+                        showToast(`學生 ${maskedName} 新增成功！`);
+                    })
+                    .catch(e => showToast(`新增失敗：${e.message}`, "error"));
             };
 
             const handleDeleteStudent = (student) => {
                 showConfirm(`確定要刪除學生 ${student.name} 的資料嗎？`, () => {
-                    setStudents(prev => prev.filter(s => s.id !== student.id));
-                    showToast(`已刪除學生 ${student.name}！`);
+                    const { db, doc, deleteDoc } = window.firebaseAPI;
+                    deleteDoc(doc(db, `${basePath}/submissions/${student.id}`))
+                        .then(() => showToast(`已刪除學生 ${student.name}！`))
+                        .catch(e => showToast(`刪除失敗：${e.message}`, "error"));
                 });
             };
 
@@ -899,11 +1032,14 @@
                 const rawName = String(modifyingStudent.name || '').trim();
                 if (!rawName) return showToast("姓名不能為空！", "error");
                 
+                const { db, doc, setDoc } = window.firebaseAPI;
                 const updatedData = { ...modifyingStudent, name: maskName(rawName) };
-                setStudents(prev => prev.map(s => s.id === updatedData.id ? updatedData : s));
-                
-                setModifyingStudent(null);
-                showToast("學生資訊與成績已成功更新！");
+                setDoc(doc(db, `${basePath}/submissions/${updatedData.id}`), updatedData)
+                    .then(() => {
+                        setModifyingStudent(null);
+                        showToast("學生資訊與成績已成功更新！");
+                    })
+                    .catch(e => showToast(`儲存失敗：${e.message}`, "error"));
             };
 
             const loadDemoData = () => {
@@ -939,9 +1075,14 @@
                     { id: "student_30", seatNo: "30", name: "周品瑜", password: "30", progress: 0, loginCount: 0, classRank: null, classRankProgress: null, schoolRank: null, schoolRankProgress: null, scores: {} }
                 ];
 
-                const processedList = class315List.map(s => ({ ...s, name: maskName(s.name) }));
-                setStudents(processedList);
-                showToast(`✅ 成功載入 315 班 ${processedList.length} 位正式學生名單！`);
+                const { db, doc, setDoc } = window.firebaseAPI;
+                const promises = class315List.map(s => {
+                    const maskedStudent = { ...s, name: maskName(s.name) };
+                    return setDoc(doc(db, `${basePath}/submissions/${maskedStudent.id}`), maskedStudent);
+                });
+                Promise.all(promises)
+                    .then(() => showToast(`✅ 成功載入 315 班 ${class315List.length} 位正式學生名單！`))
+                    .catch(e => showToast(`載入名單失敗：${e.message}`, "error"));
             };
 
             const editSubName = typeof editingSubject === 'object' && editingSubject !== null ? editingSubject.name : '';
@@ -1168,7 +1309,7 @@
                                         <button onClick={() => setEditingSubject(null)} className="text-slate-500 hover:text-slate-700 text-xs mt-1 bg-white px-3 py-2 rounded-lg shadow-sm border border-slate-200 font-black transition-colors">取消</button>
                                     </div>
                                     <input type="number" min="0" max="100" step="any" placeholder="請輸入此科成績" className="w-full p-4 bg-white border border-slate-200 rounded-xl text-center text-base sm:text-lg font-black focus:outline-none focus:ring-2 focus:ring-[#00704A] focus:border-transparent transition-all shadow-sm" value={editForm.score} onChange={e => setEditForm({ score: e.target.value })} onKeyDown={e => e.key === 'Enter' && saveStudentScore()} />
-                                    <button onClick={saveStudentScore} className="w-full bg-[#00704A] hover:bg-[#005a3c] text-white py-3.5 rounded-xl text-sm sm:text-base font-black transition shadow-md active:scale-95">💾 儲存成績</button>
+                                    <button onClick={saveStudentScore} className="w-full bg-[#00704A] hover:bg-[#005a3c] text-white py-3.5 rounded-xl text-sm sm:text-base font-black transition shadow-md active:scale-95">💾 儲存並同步</button>
                                 </div>
                             )}
                         </div>
@@ -1400,7 +1541,7 @@
                                             onClick={() => setQuickScoreMode('manual')} 
                                             className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${quickScoreMode === 'manual' ? 'bg-white shadow-sm text-[#00704A]' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-300'}`}
                                         >
-                                            ✍️ 鍵盤手 পণ্ডিত動輸入
+                                            ✍️ 鍵盤手動輸入
                                         </button>
                                         <button 
                                             onClick={() => setQuickScoreMode('paste')} 
@@ -1456,7 +1597,6 @@
                             <div 
                                 onClick={handleSecretTeacherLogin}
                                 className="w-16 h-10 rounded-2xl bg-[#00704A] flex items-center justify-center font-black text-white text-xl cursor-pointer hover:bg-[#005a3c] transition-all no-zoom-click border border-emerald-500/30 hover:scale-105 active:scale-95 shadow-sm select-none"
-                                title="點擊三下進入導師管理"
                             >
                                 {settings.className}
                             </div>
@@ -1470,7 +1610,6 @@
                                 <div 
                                     onClick={handleSecretSubjectTeacherLogin} 
                                     className="cursor-pointer bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm select-none border border-transparent hover:border-white/30"
-                                    title="點擊三下進入任課老師專區"
                                 >
                                     <span className="text-sm">👨‍🏫</span>
                                     <span className="hidden sm:inline">任課</span>
@@ -1488,17 +1627,15 @@
                             
                             <div className="w-full max-w-xl text-center mb-8 animate-fade-in">
                                 <div className="inline-block bg-emerald-100 text-emerald-800 font-bold px-4 py-1.5 rounded-full text-xs mb-3 shadow-inner">
-                                    班級經營與智慧診斷工具 ♥ 本地端運作版
+                                    班級經營與智慧診斷工具 ♥ {settings.className}專屬
                                 </div>
                                 <h2 
                                     className="text-3xl sm:text-4xl font-extrabold text-[#1E3932] tracking-wide mb-2 cursor-pointer no-zoom-click"
                                     onClick={handleSecretTeacherLogin}
-                                    title="點擊三下也可進入管理"
                                 >
                                     {settings.className} 成績通知單查詢系統
                                 </h2>
                                 <p className="text-slate-500 text-sm font-bold mt-2">歡迎登入系統，線上即時查看、自主登記範圍成績，並獲取專家級智慧學科診斷！</p>
-                                <p className="text-rose-500 text-xs font-bold mt-2 border border-rose-200 bg-rose-50 inline-block px-3 py-1 rounded-lg">※ 提示：請連點左上方綠色區塊 3 下，輸入密碼 FXM315 進入管理後台匯入名單。</p>
                             </div>
 
                             <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 max-w-md w-full relative overflow-hidden p-8 animate-fade-in">
@@ -1963,7 +2100,7 @@
                                 <div className="bg-slate-800 p-5 rounded-3xl border border-slate-700 shadow-lg flex flex-col xl:flex-row justify-between items-center gap-4 text-slate-300">
                                     <div>
                                         <h4 className="font-bold text-white flex items-center gap-2"><span>🛡️</span> 系統安全與資料備份</h4>
-                                        <p className="text-xs mt-1">您的資料目前儲存在本地瀏覽器。建議編輯完成後點擊「下載完整備份」。</p>
+                                        <p className="text-xs mt-1">建議每週備份一次。遇到新段考或新學期，可使用右側按鈕一鍵清空成績重新開始。</p>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2 justify-end">
                                         <button onClick={() => backupFileInputRef.current.click()} className="bg-slate-700 hover:bg-slate-600 text-white text-xs px-4 py-2.5 rounded-xl font-bold transition">
@@ -2110,7 +2247,7 @@
                                                         </td>
                                                     </tr>
                                                 ))}
-                                                {students.length === 0 && <tr><td colSpan="20" className="py-8 text-slate-400 font-bold text-sm">目前無名單，請使用 Excel 匯入或載入預設名單。</td></tr>}
+                                                {students.length === 0 && <tr><td colSpan="20" className="py-8 text-slate-400 font-bold text-sm">目前無名單或尚在從雲端串流載入中...</td></tr>}
                                             </tbody>
                                         </table>
                                     </div>
